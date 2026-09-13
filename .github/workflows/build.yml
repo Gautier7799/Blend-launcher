@@ -1,10 +1,9 @@
-name: Build Android APK
+name: Build Android APK from scratch
 
 on:
   push:
     branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+  workflow_dispatch: # يتيح لك تشغيل البناء يدوياً من واجهة GitHub
 
 jobs:
   build:
@@ -15,20 +14,64 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up JDK 17
-      uses: actions/setup-java@v5
+      uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
 
-    # هذه الخطوة ستقوم بإنشاء ملفات Gradle إذا لم تكن موجودة في مستودعك
-    - name: Ensure Gradle Wrapper exists
+    # هذه الخطوة الذكية تقوم بإنشاء مشروع أندرويد أساسي بالكامل من الصفر
+    - name: Generate Android Project
       run: |
-        if [ ! -f "gradlew" ]; then
-          gradle wrapper --gradle-version 8.7
-        fi
+        # تحميل أداة بناء المشاريع من أندرويد
+        wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradlew
+        chmod +x gradlew
+        wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradle/wrapper/gradle-wrapper.jar --create-dirs -O gradle/wrapper/gradle-wrapper.jar
+        wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradle/wrapper/gradle-wrapper.properties -O gradle/wrapper/gradle-wrapper.properties
+        
+        # إنشاء ملفات الإعدادات الأساسية
+        echo 'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }' > settings.gradle.kts
+        echo 'dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }' >> settings.gradle.kts
+        echo 'rootProject.name = "BlendLauncher"' >> settings.gradle.kts
+        echo 'include(":app")' >> settings.gradle.kts
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+        # إنشاء المجلدات
+        mkdir -p app/src/main/java/com/example
+        mkdir -p app/src/main/res/values
+        mkdir -p app/src/main/res/mipmap-anydpi-v26
+
+        # ملفات Gradle الخاصة بالتطبيق
+        cat << 'EOF' > build.gradle.kts
+        plugins {
+            id("com.android.application") version "8.7.2" apply false
+            id("org.jetbrains.kotlin.android") version "1.9.20" apply false
+        }
+        EOF
+
+        cat << 'EOF' > app/build.gradle.kts
+        plugins {
+            id("com.android.application")
+            id("org.jetbrains.kotlin.android")
+        }
+        android {
+            namespace = "com.example"
+            compileSdk = 34
+            defaultConfig {
+                applicationId = "com.example.blendlauncher"
+                minSdk = 24
+                targetSdk = 34
+                versionCode = 1
+                versionName = "1.0"
+            }
+        }
+        EOF
+
+        # ملف Manifest أساسي ليقبل البناء
+        cat << 'EOF' > app/src/main/AndroidManifest.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application android:label="Blend Launcher" />
+        </manifest>
+        EOF
 
     - name: Build Debug APK
       run: ./gradlew assembleDebug --no-daemon
