@@ -1,4 +1,4 @@
-name: Build Android APK from scratch
+name: Build Blend Launcher
 
 on:
   push:
@@ -19,39 +19,36 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Generate Android Project
+    - name: Generate Blend Launcher Project
       run: |
-        # تحميل أداة gradlew
+        # 1. Download Gradle Wrapper
         wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradlew
         chmod +x gradlew
-        
-        # إنشاء المجلدات المطلوبة
         mkdir -p gradle/wrapper
-        
-        # تحميل ملفات الغلاف (Wrapper)
         wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradle/wrapper/gradle-wrapper.jar -O gradle/wrapper/gradle-wrapper.jar
         wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradle/wrapper/gradle-wrapper.properties -O gradle/wrapper/gradle-wrapper.properties
         
-        # إنشاء ملفات الإعدادات الأساسية
+        # 2. Base Settings
         echo 'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }' > settings.gradle.kts
         echo 'dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }' >> settings.gradle.kts
         echo 'rootProject.name = "BlendLauncher"' >> settings.gradle.kts
         echo 'include(":app")' >> settings.gradle.kts
 
-        # إنشاء مجلدات التطبيق
-        mkdir -p app/src/main/java/com/example
+        # 3. Create Directories
+        mkdir -p app/src/main/java/com/example/domain
+        mkdir -p app/src/main/java/com/example/data
+        mkdir -p app/src/main/java/com/example/ui/viewmodels
         mkdir -p app/src/main/res/values
-        mkdir -p app/src/main/res/mipmap-anydpi-v26
 
-        # ملفات Gradle الخاصة بالتطبيق
+        # 4. Project Level build.gradle.kts
         cat << 'EOF' > build.gradle.kts
         plugins {
-            id("com.android.application") version "8.7.2" apply false
+            id("com.android.application") version "8.2.0" apply false
             id("org.jetbrains.kotlin.android") version "1.9.20" apply false
         }
         EOF
 
-        # ملف تطبيق Gradle مع إصلاح مشكلة إصدار Java 17
+        # 5. App Level build.gradle.kts (WITH ALL REQUIRED DEPENDENCIES)
         cat << 'EOF' > app/build.gradle.kts
         plugins {
             id("com.android.application")
@@ -67,6 +64,12 @@ jobs:
                 versionCode = 1
                 versionName = "1.0"
             }
+            buildFeatures {
+                compose = true
+            }
+            composeOptions {
+                kotlinCompilerExtensionVersion = "1.5.4"
+            }
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_17
                 targetCompatibility = JavaVersion.VERSION_17
@@ -75,14 +78,199 @@ jobs:
                 jvmTarget = "17"
             }
         }
+        dependencies {
+            implementation("androidx.core:core-ktx:1.12.0")
+            implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+            implementation("androidx.activity:activity-compose:1.8.2")
+            implementation(platform("androidx.compose:compose-bom:2023.10.01"))
+            implementation("androidx.compose.ui:ui")
+            implementation("androidx.compose.ui:ui-graphics")
+            implementation("androidx.compose.material3:material3")
+            implementation("io.coil-kt:coil-compose:2.5.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+        }
         EOF
 
-        # ملف Manifest أساسي
+        # 6. AndroidManifest.xml (LAUNCHER SETUP)
         cat << 'EOF' > app/src/main/AndroidManifest.xml
         <?xml version="1.0" encoding="utf-8"?>
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-            <application android:label="Blend Launcher" />
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+            xmlns:tools="http://schemas.android.com/tools">
+            <uses-permission android:name="android.permission.INTERNET" />
+            <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+            <application
+                android:allowBackup="true"
+                android:label="Blend Launcher"
+                android:supportsRtl="true"
+                android:theme="@style/Theme.BlendLauncher">
+                <activity
+                    android:name=".MainActivity"
+                    android:exported="true"
+                    android:launchMode="singleTask"
+                    android:stateNotNeeded="true"
+                    android:clearTaskOnLaunch="true"
+                    android:theme="@style/Theme.BlendLauncher">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                        <category android:name="android.intent.category.HOME" />
+                        <category android:name="android.intent.category.DEFAULT" />
+                    </intent-filter>
+                </activity>
+            </application>
         </manifest>
+        EOF
+
+        # 7. themes.xml (TRANSPARENT BACKGROUND)
+        cat << 'EOF' > app/src/main/res/values/themes.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <resources>
+            <style name="Theme.BlendLauncher" parent="android:Theme.DeviceDefault.NoActionBar">
+                <item name="android:windowBackground">@android:color/transparent</item>
+                <item name="android:windowShowWallpaper">true</item>
+                <item name="android:windowTranslucentStatus">true</item>
+                <item name="android:windowTranslucentNavigation">true</item>
+            </style>
+        </resources>
+        EOF
+
+        # 8. AppItem.kt
+        cat << 'EOF' > app/src/main/java/com/example/domain/AppItem.kt
+        package com.example.domain
+        import android.graphics.drawable.Drawable
+        data class AppItem(val label: String, val packageName: String, val icon: Drawable)
+        EOF
+
+        # 9. AppRepository.kt
+        cat << 'EOF' > app/src/main/java/com/example/data/AppRepository.kt
+        package com.example.data
+        import android.content.Context
+        import android.content.Intent
+        import android.content.pm.PackageManager
+        import android.content.pm.ResolveInfo
+        import android.os.Build
+        import com.example.domain.AppItem
+        import kotlinx.coroutines.Dispatchers
+        import kotlinx.coroutines.withContext
+        class AppRepository(private val context: Context) {
+            suspend fun getInstalledApps(): List<AppItem> = withContext(Dispatchers.IO) {
+                val pm = context.packageManager
+                val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
+                val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0L))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.queryIntentActivities(intent, 0)
+                }
+                resolveInfos.mapNotNull { resolveInfo ->
+                    try {
+                        AppItem(resolveInfo.loadLabel(pm).toString(), resolveInfo.activityInfo.packageName, resolveInfo.loadIcon(pm))
+                    } catch (e: Exception) { null }
+                }.sortedBy { it.label.lowercase() }
+            }
+        }
+        EOF
+
+        # 10. LauncherViewModel.kt
+        cat << 'EOF' > app/src/main/java/com/example/ui/viewmodels/LauncherViewModel.kt
+        package com.example.ui.viewmodels
+        import android.app.Application
+        import android.content.Intent
+        import androidx.lifecycle.AndroidViewModel
+        import androidx.lifecycle.viewModelScope
+        import com.example.data.AppRepository
+        import com.example.domain.AppItem
+        import kotlinx.coroutines.flow.MutableStateFlow
+        import kotlinx.coroutines.flow.StateFlow
+        import kotlinx.coroutines.flow.asStateFlow
+        import kotlinx.coroutines.launch
+        class LauncherViewModel(application: Application) : AndroidViewModel(application) {
+            private val repository = AppRepository(application)
+            private val _installedApps = MutableStateFlow<List<AppItem>>(emptyList())
+            val installedApps: StateFlow<List<AppItem>> = _installedApps.asStateFlow()
+            init { loadApps() }
+            fun loadApps() { viewModelScope.launch { _installedApps.value = repository.getInstalledApps() } }
+            fun launchApp(packageName: String) {
+                val pm = getApplication<Application>().packageManager
+                val launchIntent = pm.getLaunchIntentForPackage(packageName)?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                launchIntent?.let { getApplication<Application>().startActivity(it) }
+            }
+        }
+        EOF
+
+        # 11. MainActivity.kt (GLASSMORPHISM UI)
+        cat << 'EOF' > app/src/main/java/com/example/MainActivity.kt
+        package com.example
+        import android.os.Bundle
+        import androidx.activity.ComponentActivity
+        import androidx.activity.compose.setContent
+        import androidx.activity.enableEdgeToEdge
+        import androidx.activity.viewModels
+        import androidx.compose.foundation.background
+        import androidx.compose.foundation.clickable
+        import androidx.compose.foundation.layout.*
+        import androidx.compose.foundation.lazy.grid.GridCells
+        import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+        import androidx.compose.foundation.lazy.grid.items
+        import androidx.compose.foundation.shape.RoundedCornerShape
+        import androidx.compose.material3.Text
+        import androidx.compose.runtime.Composable
+        import androidx.compose.runtime.collectAsState
+        import androidx.compose.runtime.getValue
+        import androidx.compose.ui.Alignment
+        import androidx.compose.ui.Modifier
+        import androidx.compose.ui.draw.clip
+        import androidx.compose.ui.graphics.Color
+        import androidx.compose.ui.layout.ContentScale
+        import androidx.compose.ui.text.style.TextAlign
+        import androidx.compose.ui.text.style.TextOverflow
+        import androidx.compose.ui.unit.dp
+        import androidx.compose.ui.unit.sp
+        import coil.compose.AsyncImage
+        import com.example.domain.AppItem
+        import com.example.ui.viewmodels.LauncherViewModel
+
+        class MainActivity : ComponentActivity() {
+            private val viewModel: LauncherViewModel by viewModels()
+            override fun onCreate(savedInstanceState: Bundle?) {
+                super.onCreate(savedInstanceState)
+                enableEdgeToEdge()
+                setContent { BlendLauncherScreen(viewModel) }
+            }
+            @Deprecated("Deprecated in Java")
+            override fun onBackPressed() {}
+        }
+
+        @Composable
+        fun BlendLauncherScreen(viewModel: LauncherViewModel) {
+            val apps by viewModel.installedApps.collectAsState()
+            val dockApps = apps.take(4) 
+            val gridApps = if(apps.size > 4) apps.drop(4) else emptyList()
+
+            Box(modifier = Modifier.fillMaxSize().background(Color.Transparent)) {
+                Column(modifier = Modifier.fillMaxSize().padding(top = 48.dp, start = 16.dp, end = 16.dp)) {
+                    LazyVerticalGrid(columns = GridCells.Fixed(4), contentPadding = PaddingValues(bottom = 120.dp), modifier = Modifier.weight(1f)) {
+                        items(gridApps) { app -> AppIconItem(app = app, onClick = { viewModel.launchApp(app.packageName) }) }
+                    }
+                }
+                Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp, start = 16.dp, end = 16.dp).fillMaxWidth().height(90.dp).clip(RoundedCornerShape(28.dp)).background(Color.White.copy(alpha = 0.3f)).padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                        dockApps.forEach { app -> AppIconItem(app = app, showLabel = false, onClick = { viewModel.launchApp(app.packageName) }) }
+                    }
+                }
+            }
+        }
+
+        @Composable
+        fun AppIconItem(app: AppItem, showLabel: Boolean = true, onClick: () -> Unit) {
+            Column(modifier = Modifier.padding(8.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
+                AsyncImage(model = app.icon, contentDescription = app.label, modifier = Modifier.size(60.dp).clip(RoundedCornerShape(16.dp)), contentScale = ContentScale.Crop)
+                if (showLabel) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(text = app.label, fontSize = 11.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(color = Color.Black.copy(alpha = 0.5f), blurRadius = 4f)))
+                }
+            }
+        }
         EOF
 
     - name: Build Debug APK
