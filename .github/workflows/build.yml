@@ -3,7 +3,7 @@ name: Build Android APK from scratch
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # يتيح لك تشغيل البناء يدوياً من واجهة GitHub
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -19,13 +19,17 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    # هذه الخطوة الذكية تقوم بإنشاء مشروع أندرويد أساسي بالكامل من الصفر
     - name: Generate Android Project
       run: |
-        # تحميل أداة بناء المشاريع من أندرويد
+        # تحميل أداة gradlew
         wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradlew
         chmod +x gradlew
-        wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradle/wrapper/gradle-wrapper.jar --create-dirs -O gradle/wrapper/gradle-wrapper.jar
+        
+        # إنشاء المجلدات المطلوبة يدوياً قبل التحميل
+        mkdir -p gradle/wrapper
+        
+        # تحميل ملفات الغلاف (Wrapper)
+        wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradle/wrapper/gradle-wrapper.jar -O gradle/wrapper/gradle-wrapper.jar
         wget https://raw.githubusercontent.com/cortinico/kotlin-android-template/main/gradle/wrapper/gradle-wrapper.properties -O gradle/wrapper/gradle-wrapper.properties
         
         # إنشاء ملفات الإعدادات الأساسية
@@ -34,7 +38,7 @@ jobs:
         echo 'rootProject.name = "BlendLauncher"' >> settings.gradle.kts
         echo 'include(":app")' >> settings.gradle.kts
 
-        # إنشاء المجلدات
+        # إنشاء مجلدات التطبيق
         mkdir -p app/src/main/java/com/example
         mkdir -p app/src/main/res/values
         mkdir -p app/src/main/res/mipmap-anydpi-v26
