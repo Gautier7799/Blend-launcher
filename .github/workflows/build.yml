@@ -20,6 +20,13 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
+    # هذه الخطوة ستقوم بإنشاء ملفات Gradle إذا لم تكن موجودة في مستودعك
+    - name: Ensure Gradle Wrapper exists
+      run: |
+        if [ ! -f "gradlew" ]; then
+          gradle wrapper --gradle-version 8.7
+        fi
+
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
