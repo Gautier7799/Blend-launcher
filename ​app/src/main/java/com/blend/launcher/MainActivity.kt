@@ -1,0 +1,19 @@
+package com.blend.launcher
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.viewModels
+import com.blend.launcher.ui.home.HomeScreen
+import com.blend.launcher.viewmodel.LauncherViewModel
+
+class MainActivity : ComponentActivity() {
+    private val viewModel: LauncherViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            HomeScreen(viewModel = viewModel)
+        }
+    }
+}
