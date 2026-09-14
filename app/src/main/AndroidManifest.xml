@@ -1,44 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.INTERNET" />
-    <!-- صلاحية استدعاء وجلب كافة التطبيقات المثبتة في الهاتف -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <!-- صلاحية الاستعلام عن كل التطبيقات المثبتة -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <application
-        android:name=".DocCloudApplication"
         android:allowBackup="true"
-        android:hardwareAccelerated="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="Blend Launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.BlendLauncher">
-        
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:stateNotNeeded="true"
             android:clearTaskOnLaunch="true"
-            android:label="@string/app_name"
-            android:theme="@style/Theme.BlendLauncher">
+            android:stateNotNeeded="true">
+
+            <!-- الفلتر الأساسي لتحويل التطبيق إلى Launcher -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <!-- هذان السطران هما ما يخبران أندرويد أن هذا التطبيق هو Launcher -->
-                <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".ui.screens.crash.CrashActivity"
-            android:exported="false"
-            android:label="@string/crash_report"
-            android:theme="@style/Theme.BlendLauncher" />
     </application>
+
 </manifest>
