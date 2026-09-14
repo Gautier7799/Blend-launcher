@@ -2,23 +2,26 @@ package com.example.blendlauncher
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -26,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -33,16 +37,28 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// 1. نموذج البيانات للتطبيق
+// إعداد DataStore لحفظ ترتيب التطبيقات
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "launcher_prefs")
+val HOME_APPS_KEY = stringPreferencesKey("home_apps_order")
+val DOCK_APPS_KEY = stringPreferencesKey("dock_apps_order")
+
+// نموذج البيانات
 data class AppInfo(
     val label: String,
     val packageName: String,
@@ -50,15 +66,75 @@ data class AppInfo(
     val intent: Intent
 )
 
-// 2. ViewModel للتعامل مع البيانات في الخلفية
+// ViewModel لمعالجة البيانات والتخزين
 class LauncherViewModel : ViewModel() {
-    private val _installedApps = MutableStateFlow<List<AppInfo>>(emptyList())
-    val installedApps: StateFlow<List<AppInfo>> = _installedApps
+    private val _allApps = MutableStateFlow<List<AppInfo>>(emptyList())
+    val allApps: StateFlow<List<AppInfo>> = _allApps
+
+    private val _homeApps = MutableStateFlow<List<AppInfo>>(emptyList())
+    val homeApps: StateFlow<List<AppInfo>> = _homeApps
+
+    private val _dockApps = MutableStateFlow<List<AppInfo>>(emptyList())
+    val dockApps: StateFlow<List<AppInfo>> = _dockApps
+
+    private val _isEditMode = MutableStateFlow(false)
+    val isEditMode: StateFlow<Boolean> = _isEditMode
+
+    fun toggleEditMode(enabled: Boolean) {
+        _isEditMode.value = enabled
+    }
 
     fun loadApps(context: Context) {
         viewModelScope.launch {
             val apps = fetchAppsFromSystem(context)
-            _installedApps.value = apps
+            _allApps.value = apps
+            loadSavedOrder(context, apps)
+        }
+    }
+
+    private suspend fun loadSavedOrder(context: Context, apps: List<AppInfo>) {
+        val prefs = context.dataStore.data.first()
+        val homePackagesStr = prefs[HOME_APPS_KEY]
+        val dockPackagesStr = prefs[DOCK_APPS_KEY]
+
+        if (homePackagesStr == null || dockPackagesStr == null) {
+            // الإعداد الافتراضي لأول مرة
+            _homeApps.value = apps.take(12)
+            _dockApps.value = apps.drop(12).take(4)
+            saveOrder(context)
+        } else {
+            // استعادة الترتيب المحفوظ
+            val homePkgs = homePackagesStr.split(",").filter { it.isNotEmpty() }
+            val dockPkgs = dockPackagesStr.split(",").filter { it.isNotEmpty() }
+
+            _homeApps.value = homePkgs.mapNotNull { pkg -> apps.find { it.packageName == pkg } }
+            _dockApps.value = dockPkgs.mapNotNull { pkg -> apps.find { it.packageName == pkg } }
+        }
+    }
+
+    fun saveOrder(context: Context) {
+        viewModelScope.launch {
+            context.dataStore.edit { prefs ->
+                prefs[HOME_APPS_KEY] = _homeApps.value.joinToString(",") { it.packageName }
+                prefs[DOCK_APPS_KEY] = _dockApps.value.joinToString(",") { it.packageName }
+            }
+        }
+    }
+
+    fun removeAppFromHome(app: AppInfo, context: Context) {
+        _homeApps.value = _homeApps.value.filter { it.packageName != app.packageName }
+        saveOrder(context)
+    }
+
+    fun removeAppFromDock(app: AppInfo, context: Context) {
+        _dockApps.value = _dockApps.value.filter { it.packageName != app.packageName }
+        saveOrder(context)
+    }
+
+    fun addAppToHome(app: AppInfo, context: Context) {
+        if (!_homeApps.value.any { it.packageName == app.packageName }) {
+            _homeApps.value = _homeApps.value + app
+            saveOrder(context)
         }
     }
 
@@ -84,7 +160,7 @@ class LauncherViewModel : ViewModel() {
     }
 }
 
-// 3. النشاط الرئيسي
+// النشاط الرئيسي
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,12 +172,15 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// 4. واجهة المستخدم الرئيسية
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BlendLauncherScreen(viewModel: LauncherViewModel = viewModel()) {
     val context = LocalContext.current
-    val apps by viewModel.installedApps.collectAsState()
+    val allApps by viewModel.allApps.collectAsState()
+    val homeApps by viewModel.homeApps.collectAsState()
+    val dockApps by viewModel.dockApps.collectAsState()
+    val isEditMode by viewModel.isEditMode.collectAsState()
+    
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     var showAppDrawer by remember { mutableStateOf(false) }
 
@@ -113,40 +192,64 @@ fun BlendLauncherScreen(viewModel: LauncherViewModel = viewModel()) {
         modifier = Modifier
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(Color(0xFF667EEA), Color(0xFF764BA2))))
+            .clickable(enabled = isEditMode) { viewModel.toggleEditMode(false) } // الخروج من وضع التعديل عند النقر على الشاشة
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = 48.dp, bottom = 120.dp, start = 16.dp, end = 16.dp)
         ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                WidgetCard(title = "الطقس", value = "22°", modifier = Modifier.weight(1f))
-                WidgetCard(title = "البطارية", value = "85%", modifier = Modifier.weight(1f))
+            // زر إنهاء التعديل (يظهر فقط في وضع التعديل)
+            if (isEditMode) {
+                Button(
+                    onClick = { viewModel.toggleEditMode(false) },
+                    modifier = Modifier.align(Alignment.End).padding(bottom = 16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.3f))
+                ) {
+                    Text("تم (Done)", color = Color.White)
+                }
+            } else {
+                // الويدجت (تختفي في وضع التعديل لتوفير مساحة)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    WidgetCard(title = "الطقس", value = "22°", modifier = Modifier.weight(1f))
+                    WidgetCard(title = "البطارية", value = "85%", modifier = Modifier.weight(1f))
+                }
+                Spacer(modifier = Modifier.height(32.dp))
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
-
+            // شبكة التطبيقات الرئيسية
             LazyVerticalGrid(
                 columns = GridCells.Fixed(4),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
-                items(apps.take(12)) { app ->
-                    RealAppIcon(app = app, context = context)
+                items(homeApps) { app ->
+                    RealAppIcon(
+                        app = app,
+                        context = context,
+                        isEditMode = isEditMode,
+                        onLongClick = { viewModel.toggleEditMode(true) },
+                        onClick = {
+                            if (isEditMode) viewModel.removeAppFromHome(app, context)
+                            else { app.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(app.intent) }
+                        }
+                    )
                 }
             }
             
             Spacer(modifier = Modifier.weight(1f))
             
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showAppDrawer = true }
-                    .padding(vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(Icons.Default.KeyboardArrowUp, contentDescription = "App Drawer", tint = Color.White)
-                Text("اسحب للأعلى", color = Color.White, fontSize = 12.sp)
+            if (!isEditMode) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showAppDrawer = true }
+                        .padding(vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "App Drawer", tint = Color.White)
+                    Text("اسحب للأعلى", color = Color.White, fontSize = 12.sp)
+                }
             }
         }
 
@@ -166,14 +269,23 @@ fun BlendLauncherScreen(viewModel: LauncherViewModel = viewModel()) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceAround
             ) {
-                // نعرض أول 4 تطبيقات في شريط المهام كمثال مبدئي
-                apps.take(4).forEach { app ->
-                    RealAppIcon(app = app, context = context, showLabel = false)
+                dockApps.take(4).forEach { app ->
+                    RealAppIcon(
+                        app = app,
+                        context = context,
+                        showLabel = false,
+                        isEditMode = isEditMode,
+                        onLongClick = { viewModel.toggleEditMode(true) },
+                        onClick = {
+                            if (isEditMode) viewModel.removeAppFromDock(app, context)
+                            else { app.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(app.intent) }
+                        }
+                    )
                 }
             }
         }
         
-        // درج التطبيقات مع ميزة البحث الذكي (Spotlight Search)
+        // درج التطبيقات (يعمل لإضافة التطبيقات أثناء وضع التعديل)
         if (showAppDrawer) {
             ModalBottomSheet(
                 onDismissRequest = { showAppDrawer = false },
@@ -181,40 +293,33 @@ fun BlendLauncherScreen(viewModel: LauncherViewModel = viewModel()) {
                 containerColor = Color(0xFF1E1E1E).copy(alpha = 0.95f),
             ) {
                 var searchQuery by remember { mutableStateOf("") }
-                
-                // فلترة التطبيقات لحظياً بناءً على نص البحث
-                val filteredApps = remember(searchQuery, apps) {
-                    if (searchQuery.isBlank()) apps 
-                    else apps.filter { it.label.contains(searchQuery, ignoreCase = true) }
+                val filteredApps = remember(searchQuery, allApps) {
+                    if (searchQuery.isBlank()) allApps 
+                    else allApps.filter { it.label.contains(searchQuery, ignoreCase = true) }
                 }
 
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxHeight(0.85f)) {
-                    Text("مكتبة التطبيقات", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (isEditMode) "اختر تطبيقاً لإضافته للشاشة" else "مكتبة التطبيقات", 
+                        color = Color.White, 
+                        fontSize = 20.sp, 
+                        fontWeight = FontWeight.Bold
+                    )
                     
                     Spacer(modifier = Modifier.height(16.dp))
                     
-                    // شريط البحث الأنيق (Glassmorphism Search Bar)
                     TextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("بحث عن تطبيق...", color = Color.Gray) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث", tint = Color.Gray) },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "مسح", tint = Color.Gray)
-                                }
-                            }
-                        },
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = Color.White.copy(alpha = 0.1f),
                             unfocusedContainerColor = Color.White.copy(alpha = 0.1f),
                             focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedIndicatorColor = Color.Transparent,
                             unfocusedIndicatorColor = Color.Transparent,
-                            cursorColor = Color.White
+                            focusedIndicatorColor = Color.Transparent
                         ),
                         shape = RoundedCornerShape(16.dp),
                         singleLine = true
@@ -222,14 +327,25 @@ fun BlendLauncherScreen(viewModel: LauncherViewModel = viewModel()) {
 
                     Spacer(modifier = Modifier.height(24.dp))
                     
-                    // عرض التطبيقات المفلترة
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(4),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalArrangement = Arrangement.spacedBy(24.dp)
                     ) {
                         items(filteredApps) { app ->
-                            RealAppIcon(app = app, context = context)
+                            RealAppIcon(
+                                app = app,
+                                context = context,
+                                onClick = {
+                                    if (isEditMode) {
+                                        viewModel.addAppToHome(app, context)
+                                        showAppDrawer = false // إغلاق الدرج بعد الإضافة
+                                    } else {
+                                        app.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        context.startActivity(app.intent)
+                                    }
+                                }
+                            )
                         }
                     }
                 }
@@ -255,33 +371,71 @@ fun WidgetCard(title: String, value: String, modifier: Modifier = Modifier) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun RealAppIcon(app: AppInfo, context: Context, showLabel: Boolean = true) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clickable { 
-                app.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(app.intent) 
-            }
+fun RealAppIcon(
+    app: AppInfo, 
+    context: Context, 
+    showLabel: Boolean = true,
+    isEditMode: Boolean = false,
+    onLongClick: () -> Unit = {},
+    onClick: () -> Unit = {}
+) {
+    // حركة الاهتزاز (Jiggle Animation) لوضع التعديل
+    val infiniteTransition = rememberInfiniteTransition(label = "jiggle")
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = if (isEditMode) -2f else 0f,
+        targetValue = if (isEditMode) 2f else 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(150, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "rotation"
+    )
+
+    Box(
+        modifier = Modifier.rotate(rotation)
     ) {
-        val bitmap = remember(app.packageName) { drawableToBitmap(app.icon) }
-        Image(
-            bitmap = bitmap.asImageBitmap(),
-            contentDescription = app.label,
-            modifier = Modifier
-                .size(60.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color.White)
-        )
-        if (showLabel) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = app.label, 
-                color = Color.White, 
-                fontSize = 12.sp, 
-                maxLines = 1
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
             )
+        ) {
+            val bitmap = remember(app.packageName) { drawableToBitmap(app.icon) }
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = app.label,
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White)
+            )
+            if (showLabel) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = app.label, 
+                    color = Color.White, 
+                    fontSize = 12.sp, 
+                    maxLines = 1
+                )
+            }
+        }
+
+        // أيقونة الحذف في وضع التعديل (تظهر فوق أيقونة التطبيق)
+        if (isEditMode) {
+            Box(
+                modifier = Modifier
+                    .offset(x = (-6).dp, y = (-6).dp)
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .background(Color.Red)
+                    .clickable { onClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "إزالة", tint = Color.White, modifier = Modifier.size(14.dp))
+            }
         }
     }
 }
